@@ -19,5 +19,7 @@ jobs:
         source $HOME/.cargo/env
     - name: Build
       run: cargo build --verbose
+      working-directory: ./demo
     - name: Run tests
       run: cargo test --verbose
+      working-directory: ./demo
