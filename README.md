@@ -1,91 +1,94 @@
 # GitHub Actions (Safely)
 
 ## Disclaimer
-I do not condone trying anything I am about to show you.
+I do not condone trying anything I am about demo.
 
-## What is it?
+## What are Github Actions?
 
-It allows you to run code in a way that easily linked to the lifecycle of the code you're working with. Doing common tasks like running unit tests, linting code, deploying code to different environments, etc. 
+They allows you to run code in a way that easily links to the git lifecycle of the code you're working with. For common tasks like running unit tests, linting code, deploying code to different environments, etc. All during different git/github events, like commits to a certain branch or when opening a pull request.
 
 ## Who is using this?
 
-At UF Applications, Data, and Solutions integrate GitHub Actions into their daily routines, either directly or indirectly. This tool has also become a big part of modern software development practices industry wide. 
+At UF Applications, Data, and Solutions generally use GitHub Actions daily, directly or indirectly. This tool has also become a big part of modern software development practices industry wide. 
 
-## Where is the code?
+## What is this .github folder?
 
-I wrote a simple rust application that needs to be tested and deployed, shout out to Raphael for the Rust inspiration.
+That is where github actions live, in `.github/workflows`. Any yaml file in there is understood to be a special file for configuring with GitHub Action workflows. Let's look more closely at one below.
 
 ```yaml
-name: Rust
+name: Deploy to S3
 ```
 
-This is the name of the workflow. It's what you'll see on GitHub when the action is running.
-on:
-
-
+This is the name of the workflow. It's what you'll see in GitHub when the action is running.
 ```yaml
 on:
   push:
-  pull_request:
     branches: [ main ]
 ```
 This defines the events that will trigger the workflow. 
 In this case, there are two events:
 - `push:` The workflow will run when code is pushed to any branch. 
-- `pull_request`: The workflow will also run when a pull request is made to the main branch.
-
 ```yaml
 jobs:
-    build:
+    deploy:
 ```
 
-Jobs are a set of steps that execute on the same runner. This workflow contains a single job called build.
+Jobs are a set of steps that execute on the same runner (a runner is like a VM). This workflow contains a single job called deploy.
 
 
 ```yaml
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
 ```
 
-This specifies the type of OS to run the job on. In this case, it's the latest version of Ubuntu (Linux distro), and what we generally use at UF.
+This specifies what to run the job on. In this case, it's the latest version of Ubuntu a Linux distro, and what we generally use at UF.
 
 ```yaml
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
 ```
 
-Steps are individual tasks that run commands in the job, think of them as a string of bash commands you can run on one machine. The build job consists of the following steps:
+Steps are individual tasks that run commands in the job, think of them as literally a list of steps to do in order. 
 
 ```yaml
-- uses: actions/checkout@v3
+- uses: actions/checkout@v4
 ```
-This step checks out your repository code so the other steps can access it, it is a pre-built service maintained by GitHub.
+This step checks out the repository code so the other steps can access it. It is a pre-built step that is being imported, maintained by third party. This pre-built logic used in the step is called an action. 
 
 ```yaml
-- name: Install Rust
-    run: |
-    curl --proto '=https' --tlsv1.3 https://sh.rustup.rs -sSfy | sh
-    source $HOME/.cargo/env
+- name: Set up AWS CLI
+  uses: aws-actions/configure-aws-credentials@v4
+  with:
+    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+    aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+    aws-region: us-east-1
 ```
-- A named step to install Rust for other steps to use. Since we are on Ubuntu and are sure other steps will be on the same "runner" we can install Rust here for use later on. `run` just means arbtrarily run any bash command you want, with the `|` allowing you to span multiple lines.
+Another action imported that is maintained by a third party. This one installs and logs the following steps into the aws cli tool. The `with` keyword lets you pass variables to the step, in this case we pass the the credentials needed to login to the aws cli.
+
+`${{ secrets.AWS_SECRET_KEY }}` is GitHub syntax to access the secrets stored in the repository. This is so we don't have secrets visible to anyone who can see the code. This is where the problems start to arise. 
 
 ```yaml
-- name: Build
-    run: cargo build --verbose
-    working-directory: ./demo
+- name: Deploy to S3
+  run: aws s3 cp index.html s3://uf-gha-demo/index.html --acl public-read
 ```
-Rust is a compiled language, this step does the building. Of note is the `working-directory: ./demo`, this is just an easy way to say run this step's `run` in a different directory than the default. 
-
-```yaml
-- name: Run tests
-    run: cargo test --verbose
-    working-directory: ./demo
-```
-This actually runs the tests, if any fail there will be a big red X in the GitHub UI, otherwise it will be a sweet sweet green check!
+This uses the aws cli, installed in the previous step, to upload the `index.html` file installed in the first step, to s3 (a place to host websites and store stuff)!
 
 
-Checkout the file at [lint.yaml](./.github/workflows/lint.yaml)
+Checkout the file at [deploy-html.yaml](./.github/workflows/deploy-html.yaml)
 
+## What is the issue?
+
+Unfortunately, storing secrets, even using the secrets syntax, is essentially giving the secret to anyone with access to GitHub without the proper precautions. Something we have not done in every repository as of yet. 
+
+People can change the action to run not on a certain branch, but on their feature branch in a pull request. Accessing all secrets without limits in the action. They would also have a logged in aws cli at their fingertips, giving often admin access to all of aws (including Google Cloud Platform in some cases). 
+
+This means a malicious actor, or an unknowing intern, could wreck permanent havock to all of UF. All they need is the ability to create a pull request in our repos. 
+
+## Uhh how can we fix that?
+
+The solution we came to are GitHub Environments! They are a way to group repo secrets so they can only be accessed under certain defined situations. This means remove all global repo secrets, and put those secrets in a `prod` environment that only runs on `main` which is a protected branch, for example.
+
+Note: This is still an issue with Identity Federation (which is a big problem), but I believe would be possible to prevent it by using assertions based on the branch. 
